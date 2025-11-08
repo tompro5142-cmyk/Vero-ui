@@ -11,6 +11,20 @@
   "header": {
     "status": "Online"
   },
+  "uploadSettings": {
+    "enabled": true,
+    "maxFileSizeMB": 50,
+    "allowedMimeTypes": [
+      "image/*",
+      "audio/*",
+      "video/*",
+      "application/octet-stream",
+      "application/pdf",
+      "text/plain"
+    ],
+    "tempDir": "/tmp/uploads",
+    "maxFilesPerRequest": 5
+  },
   "apiSettings": {
     "creator": "VeronDev",
     "requireApikey": false,
@@ -38,8 +52,15 @@
         {
           "name": "Image to Prompt",
           "desc": "Convert images to AI prompts",
-          "path": "/ai/imgprompt?imageUrl=",
+          "path": "/ai/imgprompt",
           "status": "ready",
+          "methods": [
+            "GET",
+            "POST"
+          ],
+          "acceptsFiles": true,
+          "fileParam": "file",
+          "maxFileCount": 1,
           "params": {
             "imageUrl": "Image URL"
           }
