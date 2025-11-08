@@ -3,7 +3,7 @@
   "version": "v1.0.2",
   "description": "your simple and fast rest apis.",
   "maintenance": {
-    "enabled": true,
+    "enabled": false,
     "message": "more other api's will be loaded soon"
   },
   "bannerImage": "/src/images/banner.jpg",
