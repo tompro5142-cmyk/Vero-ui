@@ -8,6 +8,8 @@ import { createRequire } from "module"
 import dotenv from "dotenv"
 import fileUpload from "express-fileupload"
 
+dotenv.config()
+
 const nodeVersion = process.versions.node.split(".")[0]
 if (Number.parseInt(nodeVersion) < 20) {
   console.error("\x1b[31m%s\x1b[0m", "╔════════════════════════════════════════════════════════╗")
@@ -23,8 +25,6 @@ if (Number.parseInt(nodeVersion) < 20) {
   process.exit(1)
 }
 
-dotenv.config()
-
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const require = createRequire(import.meta.url)
@@ -38,15 +38,31 @@ app.set("json spaces", 2)
 app.use(express.json())
 app.use(express.urlencoded({ extended: false }))
 app.use(cors())
+
+// Load settings early so we can configure file upload middleware using settings
+const settingsPath = path.join(__dirname, "./src/settings.json")
+let settings = {}
+try {
+  settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"))
+} catch (err) {
+  console.warn("Warning: could not read settings.json at startup. Using defaults.", err.message)
+  settings = {}
+}
+
+// Configure express-fileupload using uploadSettings from settings.json when available
+const uploadSettings = settings.uploadSettings || {}
+const maxFileSize = (uploadSettings.maxFileSizeMB || 5) * 1024 * 1024
+const tempFileDir = uploadSettings.tempDir || "/tmp/"
+
 app.use(fileUpload({
   createParentPath: true,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
+    fileSize: maxFileSize, // from settings
   },
   abortOnLimit: true,
-  responseOnLimit: "File size exceeds the 5MB limit",
+  responseOnLimit: `File size exceeds the ${uploadSettings.maxFileSizeMB || 5}MB limit`,
   useTempFiles: true,
-  tempFileDir: '/tmp/'
+  tempFileDir: tempFileDir
 }))
 
 app.use((req, res, next) => {
@@ -63,8 +79,7 @@ const RATE_LIMIT_MAX = 50
 
 app.use((req, res, next) => {
   try {
-    const settings = JSON.parse(fs.readFileSync(path.join(__dirname, "./src/settings.json"), "utf-8"))
-    
+    // Use the settings loaded at startup (if it's changed on disk, apps needs restart to pick up)
     const isApiEndpoint = req.path.startsWith('/api/') || 
                          req.path.startsWith('/ai/') || 
                          req.path.startsWith('/random/') || 
@@ -111,19 +126,19 @@ setInterval(() => {
 
 app.use((req, res, next) => {
   try {
-    const settings = JSON.parse(fs.readFileSync(path.join(__dirname, "./src/settings.json"), "utf-8"))
+    const settingsLocal = settings // already loaded at startup
 
     const skipPaths = ["/api/settings", "/assets/", "/src/", "/api/preview-image", "/src/sponsor.json", "/support"]
-    const shouldSkip = skipPaths.some((path) => req.path.startsWith(path))
+    const shouldSkip = skipPaths.some((pathPref) => req.path.startsWith(pathPref))
 
-    if (settings.maintenance && settings.maintenance.enabled && !shouldSkip) {
+    if (settingsLocal.maintenance && settingsLocal.maintenance.enabled && !shouldSkip) {
       if (req.path.startsWith("/api/") || req.path.startsWith("/ai/") || req.path.startsWith("/tools/")) {
         return res.status(503).json({
           status: false,
           error: "Service temporarily unavailable",
           message: "The API is currently under maintenance. Please try again later.",
           maintenance: true,
-          creator: settings.apiSettings?.creator || "VGX Team",
+          creator: settingsLocal.apiSettings?.creator || "VGX Team",
         })
       }
 
@@ -185,7 +200,7 @@ app.get("/api/preview-image", (req, res) => {
 
 app.get("/api/settings", (req, res) => {
   try {
-    const settings = JSON.parse(fs.readFileSync(path.join(__dirname, "src", "settings.json"), "utf-8"))
+    // Return the settings that were loaded at startup
     res.json(settings)
   } catch (error) {
     res.status(500).sendFile(path.join(__dirname, "page", "status", "5xx", "500.html"))
@@ -237,16 +252,14 @@ app.use("/src", (req, res, next) => {
   }
 })
 
-const settingsPath = path.join(__dirname, "./src/settings.json")
-const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"))
-
+// response wrapper: attach creator and status default
 app.use((req, res, next) => {
   const originalJson = res.json
   res.json = function (data) {
     if (data && typeof data === "object") {
       const responseData = {
         status: data.status ?? true,
-        creator: settings.apiSettings.creator || "VeronDev",
+        creator: settings.apiSettings?.creator || "VeronDev",
         ...data,
       }
       return originalJson.call(this, responseData)
