@@ -1,8 +1,19 @@
 
 import axios from "axios"
 import FormData from "form-data"
+import fs from "fs"
+import path from "path"
 
 export default function imgPromptRoute(app) {
+  const settingsPath = path.join(process.cwd(), "src", "settings.json")
+  let settings = {}
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"))
+  } catch (e) {
+    settings = {}
+  }
+  const uploadSettings = settings.uploadSettings || {}
+
   app.get("/ai/imgprompt", async (req, res) => {
     try {
       const { imageUrl } = req.query
@@ -91,22 +102,60 @@ export default function imgPromptRoute(app) {
     }
   })
 
-  // Alternative endpoint for base64 image data
+  // Alternative endpoint for base64 image data OR multipart upload 'file'
   app.post("/ai/imgprompt", async (req, res) => {
     try {
-      const { imageData } = req.body
-      
-      if (!imageData) {
+      let imageBuffer = null
+
+      // 1) multipart/form-data via express-fileupload
+      if (req.files && (req.files.file || req.files['files[]'])) {
+        let uploaded = req.files.file || req.files['files[]']
+        const filesArray = Array.isArray(uploaded) ? uploaded : [uploaded]
+
+        // validation
+        const maxFiles = uploadSettings.maxFilesPerRequest || 5
+        if (filesArray.length > maxFiles) {
+          return res.status(400).json({ status: false, error: "Too many files", message: `Max ${maxFiles} files allowed` })
+        }
+
+        for (const f of filesArray) {
+          const maxBytes = (uploadSettings.maxFileSizeMB || 5) * 1024 * 1024
+          if (f.size > maxBytes) {
+            return res.status(413).json({ status: false, error: "File too large", message: `${f.name} exceeds the ${uploadSettings.maxFileSizeMB || 5}MB limit` })
+          }
+          // simple mime check
+          if (uploadSettings.allowedMimeTypes && Array.isArray(uploadSettings.allowedMimeTypes) && uploadSettings.allowedMimeTypes.length) {
+            const ok = uploadSettings.allowedMimeTypes.some((pattern) => {
+              if (pattern === "*/*") return true
+              if (pattern.endsWith("/*")) return f.mimetype.startsWith(pattern.replace("/*", "/"))
+              return f.mimetype === pattern
+            })
+            if (!ok) {
+              return res.status(415).json({ status: false, error: "Unsupported media type", message: `Mimetype ${f.mimetype} not allowed` })
+            }
+          }
+        }
+
+        // use first file for prompt
+        const fileObj = filesArray[0]
+        if (fileObj.data && Buffer.isBuffer(fileObj.data)) {
+          imageBuffer = fileObj.data
+        } else if (fileObj.tempFilePath && fs.existsSync(fileObj.tempFilePath)) {
+          imageBuffer = fs.readFileSync(fileObj.tempFilePath)
+        } else {
+          return res.status(400).json({ status: false, error: "Invalid file", message: "Uploaded file is missing or unreadable" })
+        }
+      } else if (req.body?.imageData) {
+        // 2) base64 payload (legacy)
+        const base64Data = req.body.imageData.replace(/^data:image\/\w+;base64,/, "")
+        imageBuffer = Buffer.from(base64Data, 'base64')
+      } else {
         return res.status(400).json({
           status: false,
           error: "Image data is required",
-          message: "Please provide imageData in base64 format"
+          message: "Please provide imageData in base64 format or upload a file in form field 'file'"
         })
       }
-
-      // Convert base64 to buffer
-      const base64Data = imageData.replace(/^data:image\/\w+;base64,/, "")
-      const imageBuffer = Buffer.from(base64Data, 'base64')
 
       // Create form data for NeuralFrames API
       const form = new FormData()
@@ -151,4 +200,4 @@ export default function imgPromptRoute(app) {
       })
     }
   })
-}
+    }
