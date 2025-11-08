@@ -231,7 +231,7 @@
                         <!-- Query input will be dynamically loaded here -->
                     </div>
 
-                    <!-- New: File upload area supporting images/audio/all files -->
+                    <!-- File upload area supporting images/audio/all files -->
                     <div id="fileUploadContainer" class="mb-3" style="display:none;">
                       <label for="apiFileInput" class="form-label fw-semibold">Attach files (images, audio, or any file)</label>
                       <input id="apiFileInput" class="form-control" type="file" accept="*/*" multiple aria-label="Attach files for upload" />
@@ -257,14 +257,7 @@
                     </section>
                 </div>
                 <footer class="modal-footer">
-                    <!-- Method selector -->
-                    <div class="d-flex align-items-center me-auto">
-                      <label for="methodSelect" class="me-2 mb-0">Method</label>
-                      <select id="methodSelect" class="form-select form-select-sm" style="width:110px;">
-                        <option value="GET" selected>GET</option>
-                        <option value="POST">POST</option>
-                      </select>
-                    </div>
+                    <!-- Note: Method selector removed as requested -->
 
                     <!-- Existing GET/Submit button used by the site's script (kept for compatibility) -->
                     <button id="submitQueryBtn" class="btn btn-primary" disabled>
@@ -272,7 +265,7 @@
                         <i class="fas fa-paper-plane ms-2" aria-hidden="true"></i>
                     </button>
 
-                    <!-- New dedicated POST button to handle file uploads and form-data POSTs -->
+                    <!-- Dedicated POST button to handle file uploads and form-data POSTs -->
                     <button id="submitPostBtn" class="btn btn-success ms-2" style="display:none;">
                         <span>POST</span>
                         <i class="fas fa-upload ms-2" aria-hidden="true"></i>
@@ -339,249 +332,6 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/assets/script.js"></script>
-
-    <!-- Small enhancement script: adds POST button, file-upload UI and POST-with-FormData behavior.
-         This script does NOT alter the existing script.js behavior for GET; it adds a separate POST flow
-         so it remains compatible with the original code. -->
-    <script>
-    (function () {
-      // Elements
-      const methodSelect = document.getElementById('methodSelect');
-      const submitPostBtn = document.getElementById('submitPostBtn');
-      const submitQueryBtn = document.getElementById('submitQueryBtn');
-      const fileUploadContainer = document.getElementById('fileUploadContainer');
-      const apiFileInput = document.getElementById('apiFileInput');
-      const apiQueryInputContainer = document.getElementById('apiQueryInputContainer');
-      const apiEndpointEl = document.getElementById('apiEndpoint');
-      const apiResponseLoading = document.getElementById('apiResponseLoading');
-      const responseContainer = document.getElementById('responseContainer');
-      const apiResponseContent = document.getElementById('apiResponseContent');
-
-      // Show/hide UI elements based on method
-      function updateMethodUI() {
-        const method = methodSelect.value;
-        if (method === 'POST') {
-          submitPostBtn.style.display = 'inline-block';
-          submitQueryBtn.style.display = 'none';
-          fileUploadContainer.style.display = '';
-        } else {
-          submitPostBtn.style.display = 'none';
-          submitQueryBtn.style.display = '';
-          fileUploadContainer.style.display = 'none';
-        }
-      }
-
-      methodSelect.addEventListener('change', updateMethodUI);
-      updateMethodUI();
-
-      // Helper: shows response (JSON, text or images/videos) in same way as main script
-      async function displayFetchResponse(response, apiName) {
-        responseContainer.classList.remove('d-none');
-        apiResponseContent.classList.add('d-none');
-        apiResponseContent.innerHTML = '';
-        // image or video
-        const contentType = response.headers.get('Content-Type') || '';
-        if (contentType.includes('image/')) {
-          const blob = await response.blob();
-          const imageUrl = URL.createObjectURL(blob);
-          const img = document.createElement('img');
-          img.src = imageUrl;
-          img.alt = apiName || 'image';
-          img.className = 'response-image img-fluid rounded shadow-sm fade-in';
-          apiResponseContent.classList.remove('d-none');
-          apiResponseContent.innerHTML = '';
-          apiResponseContent.appendChild(img);
-        } else if (contentType.includes('video/')) {
-          const blob = await response.blob();
-          const videoUrl = URL.createObjectURL(blob);
-          const video = document.createElement('video');
-          video.src = videoUrl;
-          video.controls = true;
-          video.className = 'response-video w-100 rounded shadow-sm fade-in';
-          apiResponseContent.classList.remove('d-none');
-          apiResponseContent.innerHTML = '';
-          apiResponseContent.appendChild(video);
-        } else {
-          // try JSON
-          try {
-            const data = await response.json();
-            apiResponseContent.classList.remove('d-none');
-            apiResponseContent.textContent = JSON.stringify(data, null, 2);
-          } catch (err) {
-            const text = await response.text();
-            apiResponseContent.classList.remove('d-none');
-            apiResponseContent.textContent = text || 'Response has no content or unknown format.';
-          }
-        }
-      }
-
-      // Build FormData from inputs and file input
-      function buildFormDataFromInputs() {
-        const fd = new FormData();
-        // collect inputs created by main script - they have data-param attributes
-        const inputs = apiQueryInputContainer.querySelectorAll('input, select, textarea');
-        inputs.forEach((input) => {
-          const param = input.dataset && input.dataset.param ? input.dataset.param : input.name || input.id;
-          if (!param) return;
-          if (input.type === 'file') {
-            // skip - file input handled separately
-            return;
-          }
-          if (input.type === 'checkbox' || input.type === 'radio') {
-            if (input.checked) fd.append(param, input.value);
-          } else {
-            if (input.value !== '') fd.append(param, input.value);
-          }
-        });
-
-        // Append files (multiple supported). Name files as 'files[]' so server can accept arrays,
-        // but also append each file with its original name as fallback.
-        if (apiFileInput && apiFileInput.files && apiFileInput.files.length) {
-          Array.from(apiFileInput.files).forEach((file, idx) => {
-            // primary: 'files[]'
-            fd.append('files[]', file, file.name);
-            // secondary: individual file param names (file0, file1...)
-            fd.append(`file${idx}`, file, file.name);
-          });
-        }
-
-        return fd;
-      }
-
-      // Validate required inputs before POST (similar behavior to main script validation)
-      function validateRequiredInputs() {
-        const requiredInputs = apiQueryInputContainer.querySelectorAll('input[required], textarea[required], select[required]');
-        let ok = true;
-        requiredInputs.forEach((input) => {
-          if (!input.value || input.value.trim() === '') {
-            ok = false;
-            input.classList.add('is-invalid');
-          } else {
-            input.classList.remove('is-invalid');
-          }
-        });
-        return ok;
-      }
-
-      // Perform POST (multipart/form-data) to apiEndpointEl text
-      submitPostBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        // Basic validation
-        if (!validateRequiredInputs()) {
-          // show a small alert inside query container
-          let alertEl = apiQueryInputContainer.querySelector('.post-validation-alert');
-          if (!alertEl) {
-            alertEl = document.createElement('div');
-            alertEl.className = 'alert alert-danger post-validation-alert mt-2';
-            alertEl.setAttribute('role', 'alert');
-            apiQueryInputContainer.appendChild(alertEl);
-          }
-          alertEl.textContent = 'Please fill in all required fields before POSTing.';
-          return;
-        } else {
-          const existing = apiQueryInputContainer.querySelector('.post-validation-alert');
-          if (existing) existing.remove();
-        }
-
-        const endpoint = (apiEndpointEl && apiEndpointEl.textContent) ? apiEndpointEl.textContent.trim() : null;
-        if (!endpoint) {
-          alert('No endpoint found to POST to.');
-          return;
-        }
-
-        // show loading state
-        apiResponseLoading.classList.remove('d-none');
-        responseContainer.classList.add('d-none');
-        apiResponseContent.classList.add('d-none');
-        submitPostBtn.disabled = true;
-        submitPostBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Uploading...';
-
-        try {
-          const formData = buildFormDataFromInputs();
-
-          // Send POST
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 60000);
-
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            body: formData,
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            // try to get json error
-            let errText = response.statusText;
-            try {
-              const errData = await response.json();
-              errText = errData.message || JSON.stringify(errData);
-            } catch (ignore) {
-              try {
-                errText = await response.text();
-              } catch (ignore2) {}
-            }
-            throw new Error(`HTTP ${response.status} — ${errText}`);
-          }
-
-          await displayFetchResponse(response, endpoint);
-        } catch (err) {
-          responseContainer.classList.remove('d-none');
-          apiResponseContent.classList.remove('d-none');
-          apiResponseContent.textContent = `Error: ${err.message || err}`;
-          console.error('POST error:', err);
-        } finally {
-          apiResponseLoading.classList.add('d-none');
-          submitPostBtn.disabled = false;
-          submitPostBtn.innerHTML = '<span>POST</span><i class="fas fa-upload ms-2" aria-hidden="true"></i>';
-        }
-      });
-
-      // Keep file container visibility in sync when modal opens and when method changes.
-      // The main script shows the modal via Bootstrap; listen to shown event to refresh UI.
-      const apiModalEl = document.getElementById('apiResponseModal');
-      apiModalEl && apiModalEl.addEventListener('shown.bs.modal', () => {
-        updateMethodUI();
-        // reset file input when modal opens
-        if (apiFileInput) apiFileInput.value = '';
-      });
-
-      // Accessibility: copy endpoint & copy response handlers (if main script didn't already attach)
-      const copyEndpointBtn = document.getElementById('copyEndpoint');
-      if (copyEndpointBtn) {
-        copyEndpointBtn.addEventListener('click', async () => {
-          try {
-            await navigator.clipboard.writeText(apiEndpointEl.textContent.trim());
-            const original = copyEndpointBtn.innerHTML;
-            copyEndpointBtn.innerHTML = '<i class="fas fa-check"></i>';
-            setTimeout(() => (copyEndpointBtn.innerHTML = original), 1200);
-          } catch (err) {
-            console.warn('Copy failed', err);
-          }
-        });
-      }
-
-      const copyResponseBtn = document.getElementById('copyResponse');
-      if (copyResponseBtn) {
-        copyResponseBtn.addEventListener('click', async () => {
-          try {
-            const text = apiResponseContent.textContent || '';
-            await navigator.clipboard.writeText(text);
-            const original = copyResponseBtn.innerHTML;
-            copyResponseBtn.innerHTML = '<i class="fas fa-check"></i>';
-            setTimeout(() => (copyResponseBtn.innerHTML = original), 1200);
-          } catch (err) {
-            console.warn('Copy response failed', err);
-          }
-        });
-      }
-
-      // If the method is switched back to GET ensure original Submit button is enabled/disabled per main script logic.
-      // We don't interfere with the main script's submitQueryBtn handler; it's kept for GET and compatibility.
-    })();
-    </script>
 
     <script>
     function showFeedbackModal() {

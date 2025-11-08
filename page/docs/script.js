@@ -1,3 +1,12 @@
+/* page/docs/script.js
+   Full updated client script for docs UI with POST/file-upload support.
+   - Adds POST button on API cards and opens modal in POST mode
+   - Hides method selector when modal opened from POST card
+   - Validates presence of files before POST
+   - Appends 'file' field when a single file is uploaded for server compatibility
+   - Keeps GET behavior intact
+*/
+
 document.addEventListener("DOMContentLoaded", async () => {
   const DOM = {
     loadingScreen: document.getElementById("loadingScreen"),
@@ -40,7 +49,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     dynamicImage: document.getElementById("dynamicImage"),
     apiLinksContainer: document.getElementById("apiLinks"),
   }
-
 
   let settings = {}
   let currentApiData = null
@@ -506,7 +514,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     initSideNav()
     initModal()
 
-    const [settingsResult, notificationsResult, sponsorResult] = await Promise.allSettled([
+    const [settingsResult] = await Promise.allSettled([
       fetch("/api/settings").then((res) =>
         res.ok ? res.json() : Promise.reject(new Error(`Failed to load settings: ${res.status}`)),
       ),
@@ -568,6 +576,16 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (DOM.modal.element) {
       DOM.modal.element.addEventListener("hidden.bs.modal", () => {
+        // restore method selector visibility and any forced state
+        try {
+          if (DOM.modal.element.dataset.forcedMethod) {
+            delete DOM.modal.element.dataset.forcedMethod
+            const methodLabel = DOM.modal.element.querySelector('label[for="methodSelect"]')
+            if (DOM.modal.methodSelect) DOM.modal.methodSelect.style.display = ""
+            if (methodLabel) methodLabel.style.display = ""
+          }
+        } catch (e) { /* ignore */ }
+
         const currentShare = getUrlParameter("share")
         if (currentShare) {
           removeUrlParameter("share")
@@ -579,12 +597,13 @@ document.addEventListener("DOMContentLoaded", async () => {
           }
         }
       })
+
       DOM.modal.element.addEventListener('shown.bs.modal', () => {
         // reset file input when modal opens
         if (DOM.modal.fileInput) {
           try { DOM.modal.fileInput.value = ''; } catch(e){}
         }
-        // ensure UI reflects current method selection
+        // reflect current method selection
         const ms = DOM.modal.methodSelect
         if (ms) {
           const fileContainer = DOM.modal.fileUploadContainer
@@ -594,6 +613,16 @@ document.addEventListener("DOMContentLoaded", async () => {
           if (submitPost) submitPost.style.display = ms.value === 'POST' ? 'inline-block' : 'none'
           if (submitGet) submitGet.style.display = ms.value === 'POST' ? 'none' : ''
         }
+
+        // hide method selector if modal opened via POST card (forcedMethod)
+        try {
+          const forced = DOM.modal.element.dataset.forcedMethod === 'POST'
+          if (forced) {
+            const methodLabel = DOM.modal.element.querySelector('label[for="methodSelect"]')
+            if (DOM.modal.methodSelect) DOM.modal.methodSelect.style.display = 'none'
+            if (methodLabel) methodLabel.style.display = 'none'
+          }
+        } catch (e) { /* ignore */ }
       })
     }
 
@@ -897,6 +926,10 @@ document.addEventListener("DOMContentLoaded", async () => {
               item.params &&
               Object.values(item.params).some((v) => /image|file|imageData|imageUrl|fileData/i.test(String(v)))
             const nameHasImage = /image|photo|upload|file/i.test(item.name || "")
+            // Also respect explicit metadata if provided
+            if (Array.isArray(item.methods) && item.methods.includes("POST")) {
+              return item.acceptsFiles === true || hasImageParam || nameHasImage || pathNoQuery.includes("/ai/")
+            }
             return pathNoQuery.includes("/ai/") || hasImageParam || nameHasImage
           } catch (e) {
             return false
@@ -906,7 +939,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (supportsPost) {
           const postBtn = document.createElement("button")
           postBtn.type = "button"
-          // match GET sizing/appearance by reusing get-api-btn classes
+          // reuse GET button styling so size/appearance match
           postBtn.className = "btn get-api-btn post-api-btn btn-sm"
           postBtn.innerHTML = 'POST'
           // store metadata for handler
@@ -1038,11 +1071,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       setupModalForApi(currentApiData)
 
-      // set modal to POST mode
+      // set modal to POST mode and mark that we forced POST so UI can hide the method selector
       const methodSelect = document.getElementById("methodSelect")
       const fileContainer = document.getElementById("fileUploadContainer")
       const submitPost = document.getElementById("submitPostBtn")
       const submitGet = document.getElementById("submitQueryBtn")
+      if (DOM.modal.element) DOM.modal.element.dataset.forcedMethod = 'POST'
       if (methodSelect) {
         methodSelect.value = "POST"
         // show/hide accordingly
@@ -1050,7 +1084,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (submitPost) submitPost.style.display = "inline-block"
         if (submitGet) submitGet.style.display = "none"
       } else {
-        // fallback: show file container if exists
         if (fileContainer) fileContainer.style.display = ""
         if (submitPost) submitPost.style.display = "inline-block"
         if (submitGet) submitGet.style.display = "none"
@@ -1065,6 +1098,16 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     getApiBtn.classList.add("pulse-animation")
     setTimeout(() => getApiBtn.classList.remove("pulse-animation"), 300)
+
+    // ensure any previous forced flag is removed so method selector shows normally
+    try {
+      if (DOM.modal.element && DOM.modal.element.dataset.forcedMethod) {
+        delete DOM.modal.element.dataset.forcedMethod
+      }
+      const methodLabel = DOM.modal.element && DOM.modal.element.querySelector('label[for="methodSelect"]')
+      if (DOM.modal.methodSelect) DOM.modal.methodSelect.style.display = ""
+      if (methodLabel) methodLabel.style.display = ""
+    } catch (e) { /* ignore */ }
 
     currentApiData = {
       path: getApiBtn.dataset.apiPath,
@@ -1407,7 +1450,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const param = input.dataset && input.dataset.param ? input.dataset.param : input.name || input.id
       if (!param) return
       if (input.type === 'file') {
-        // skip - file input is handled via DOM.modal.fileInput
+        // skip - file input handled via DOM.modal.fileInput
         return
       }
       if (input.type === 'checkbox' || input.type === 'radio') {
@@ -1419,12 +1462,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Append files (multiple supported)
     if (DOM.modal.fileInput && DOM.modal.fileInput.files && DOM.modal.fileInput.files.length) {
-      Array.from(DOM.modal.fileInput.files).forEach((file, idx) => {
+      const files = Array.from(DOM.modal.fileInput.files)
+      files.forEach((file, idx) => {
         // primary: 'files[]'
         fd.append('files[]', file, file.name)
         // secondary: individual file param names (file0, file1...)
         fd.append(`file${idx}`, file, file.name)
       })
+      // If single file and server expects 'file', append 'file' too (compatibility)
+      if (files.length === 1) {
+        fd.append('file', files[0], files[0].name)
+      }
     }
 
     return fd
@@ -1522,7 +1570,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (!currentApiData) return
 
-    // validate
+    // validate form fields
     if (!validateRequiredInputs()) {
       let alertEl = DOM.modal.queryInputContainer.querySelector('.post-validation-alert')
       if (!alertEl) {
@@ -1536,6 +1584,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     } else {
       const existing = DOM.modal.queryInputContainer.querySelector('.post-validation-alert')
       if (existing) existing.remove()
+    }
+
+    // Ensure a file is attached (prevents sending POST with no file)
+    if (DOM.modal.fileInput && DOM.modal.fileInput.files && DOM.modal.fileInput.files.length === 0) {
+      let alertEl = DOM.modal.queryInputContainer.querySelector('.post-validation-alert')
+      if (!alertEl) {
+        alertEl = document.createElement('div')
+        alertEl.className = 'alert alert-danger post-validation-alert mt-2'
+        alertEl.setAttribute('role', 'alert')
+        DOM.modal.queryInputContainer.appendChild(alertEl)
+      }
+      alertEl.textContent = 'Please attach at least one file before POSTing.'
+      return
     }
 
     const endpoint = DOM.modal.endpoint && DOM.modal.endpoint.textContent ? DOM.modal.endpoint.textContent.trim() : null
